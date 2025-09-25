@@ -1,1 +1,378 @@
 
+################################################################################################
+                  ###SQL Data Transformation for Model Building###
+################################################################################################
+
+############################################################################################################################################################
+### Merge all time-point data from vital signs and pumps
+DROP TABLE IF EXISTS cip01;
+CREATE TABLE cip01 AS   
+(
+    SELECT
+        p.ope_rat_id AS id,
+        t1.time,
+        p.diff,
+        p.dosage,
+        p.dosage_speed
+    FROM
+    (
+        SELECT
+            t.time
+        FROM
+        (
+            SELECT
+                m.event_time AS time
+            FROM eventsheet m
+            UNION
+            SELECT
+                n.time AS time
+            FROM monitorsheet n
+            UNION
+            SELECT
+                o.use_start_time AS time
+            FROM pumpsheet o
+            UNION
+            SELECT
+                r.create_time AS time
+            FROM opeinfo r
+        ) t
+        ORDER BY t.time
+    ) t1
+    LEFT OUTER JOIN pumpsheet p 
+        ON t1.time = p.use_start_time
+    ORDER BY t1.time
+);
+
+############################################################################################################################################################
+### Clean infusion pump data
+### Remove duplicate data at the same time point
+DROP TABLE IF EXISTS cip02;
+CREATE TABLE cip02 AS   
+(
+    SELECT
+        d.*,
+        a.diff,
+        a.dosage,
+        a.dosage_speed AS speed
+    FROM
+    (
+        SELECT
+            row_number() OVER (PARTITION BY c.time ORDER BY c.id IS NULL ASC, c.time) AS dlnum,   ### Place values with empty id at the same time point first
+            c.id,
+            c.time
+        FROM
+        (
+            SELECT
+                a.id,
+                a.time
+            FROM cip01 a
+            UNION
+            SELECT
+                b.ope_rat_id AS id,
+                b.create_time AS time 
+            FROM opeinfo b
+            ORDER BY time, id
+        ) c
+    ) d
+    LEFT JOIN cip01 a
+        ON d.time = a.time
+    WHERE d.dlnum = 1
+);
+
+############################################################################################################################################################
+### Data merging
+DROP TABLE IF EXISTS cip03;
+CREATE TABLE cip03 AS   
+(
+    SELECT
+        a.id,
+        a.time,
+        a.diff,
+        a.dosage,
+        a.speed,
+        r1.sex,
+        r1.age,
+        r1.height,
+        r1.weight,
+        m2.SPO2,
+        n2.PR,
+        o2.BIS,
+        p2.ETCO2,
+        q2.EMG
+    FROM cip02 a
+    LEFT OUTER JOIN  
+    (
+        SELECT
+            m1.ope_rat_id,
+            m1.SPO2,
+            m1.time
+        FROM
+        (
+            SELECT 
+                row_number() OVER (PARTITION BY m.time ORDER BY m.ope_rat_id, m.obs_id) AS dlnum,
+                m.ope_rat_id,
+                m.obs_value AS SPO2,
+                m.time
+            FROM monitorsheet m
+            WHERE m.obs_id = 1004
+            ORDER BY m.time
+        ) m1
+    ) m2
+        ON a.time = m2.time
+    LEFT OUTER JOIN  
+    (
+        SELECT
+            n1.ope_rat_id,
+            n1.PR,
+            n1.time
+        FROM
+        (
+            SELECT 
+                row_number() OVER (PARTITION BY n.time ORDER BY n.ope_rat_id, n.obs_id) AS dlnum,
+                n.ope_rat_id,
+                n.obs_value AS PR,
+                n.time
+            FROM monitorsheet n
+            WHERE n.obs_id = 1003
+            ORDER BY n.time
+        ) n1
+    ) n2
+        ON a.time = n2.time
+    LEFT OUTER JOIN  
+    (
+        SELECT
+            o1.ope_rat_id,
+            o1.BIS,
+            o1.time
+        FROM
+        (
+            SELECT 
+                row_number() OVER (PARTITION BY o.time ORDER BY o.ope_rat_id, o.obs_id) AS dlnum,
+                o.ope_rat_id,
+                o.obs_value AS BIS,
+                o.time
+            FROM monitorsheet o
+            WHERE o.obs_id = 1018
+            ORDER BY o.time
+        ) o1
+    ) o2
+        ON a.time = o2.time
+    LEFT OUTER JOIN  
+    (
+        SELECT
+            p1.ope_rat_id,
+            p1.ETCO2,
+            p1.time
+        FROM
+        (
+            SELECT 
+                row_number() OVER (PARTITION BY p.time ORDER BY p.ope_rat_id, p.obs_id) AS dlnum,
+                p.ope_rat_id,
+                p.obs_value AS ETCO2,
+                p.time
+            FROM monitorsheet p
+            WHERE p.obs_id = 2003
+            ORDER BY p.time
+        ) p1
+    ) p2
+        ON a.time = p2.time
+    LEFT OUTER JOIN  
+    (
+        SELECT
+            q1.ope_rat_id,
+            q1.EMG,
+            q1.time
+        FROM
+        (
+            SELECT 
+                row_number() OVER (PARTITION BY q.time ORDER BY q.ope_rat_id, q.obs_id) AS dlnum,
+                q.ope_rat_id,
+                q.obs_value AS EMG,
+                q.time
+            FROM monitorsheet q
+            WHERE q.obs_id = 5001
+            ORDER BY q.time
+        ) q1
+    ) q2
+        ON a.time = q2.time
+    LEFT OUTER JOIN  
+    (
+        SELECT
+            r.ope_rat_id AS id,
+            CASE 
+                WHEN LOWER(r.sex) LIKE '男' THEN 1
+                ELSE 0 
+            END AS sex,
+            r.age,
+            r.height,
+            r.weight
+        FROM opeinfo r
+    ) r1
+        ON a.id = r1.id
+);
+
+############################################################################################################################################################
+### Data merging, remove duplicate time point data
+DROP TABLE IF EXISTS cip04;
+CREATE TABLE cip04 AS   
+(
+    SELECT
+        row_number() OVER (ORDER BY b.time) AS rownum,
+        b.id,
+        b.time,
+        b.diff,
+        b.dosage,
+        b.speed,
+        b.sex,
+        b.age,
+        b.height,
+        b.weight,
+        b.SPO2,
+        b.PR,
+        b.BIS,
+        b.ETCO2,
+        b.EMG
+    FROM
+    (
+        SELECT
+            row_number() OVER (PARTITION BY a1.time ORDER BY a1.time) AS dlnum,  
+            a1.*
+        FROM
+        (
+            SELECT
+                row_number() OVER (ORDER BY a.time) AS rownum,
+                a.*
+            FROM cip03 a
+            GROUP BY 
+                a.time, a.id, a.diff, a.dosage, a.speed, 
+                a.sex, a.age, a.height, a.weight, 
+                a.SPO2, a.PR, a.BIS, a.ETCO2, a.EMG
+        ) a1 
+    ) b
+    WHERE b.dlnum = 1
+        AND 
+        (
+            b.diff IS NOT NULL
+            OR b.dosage IS NOT NULL
+            OR b.speed IS NOT NULL
+            OR b.sex IS NOT NULL
+            OR b.age IS NOT NULL
+            OR b.height IS NOT NULL
+            OR b.weight IS NOT NULL
+            OR b.SPO2 IS NOT NULL
+            OR b.PR IS NOT NULL
+            OR b.BIS IS NOT NULL
+            OR b.ETCO2 IS NOT NULL
+            OR b.EMG IS NOT NULL
+        )
+    ORDER BY b.time
+);
+
+############################################################################################################################################################
+### Add previous time point and corresponding interpolation
+DROP TABLE IF EXISTS cip05;
+CREATE TABLE cip05 AS   
+(
+    SELECT
+        TIME_TO_SEC(TIMEDIFF(t.time, t.last_time)) AS diff_time,
+        t.*
+    FROM
+    (
+        SELECT
+            a.*,
+            b.time AS last_time
+        FROM cip04 a
+        LEFT OUTER JOIN cip04 b
+            ON a.rownum = b.rownum + 1
+        ORDER BY a.rownum
+    ) t
+);
+
+############################################################################################################################################################
+### Adverse event data merging
+DROP TABLE IF EXISTS cip06;
+CREATE TABLE cip06 AS   
+(
+    SELECT
+        a.id,
+        a.time,
+        a.diff_time,
+        a.diff,
+        a.dosage,
+        a.speed,
+        a.sex,
+        a.age,
+        a.height,
+        a.weight,
+        a.SPO2,
+        a.PR,
+        a.BIS,
+        -- a.ETCO2,
+        a.EMG,
+        et2.recovery,
+        et7.oxygen,
+        et3.mandible,
+        et4.support_vent
+    FROM cip05 a
+    LEFT OUTER JOIN  
+    (
+        SELECT
+            t2.event_time AS time,
+            1 AS recovery
+        FROM eventsheet t2
+        WHERE t2.event_num = 2
+    ) et2
+        ON a.time = et2.time
+    LEFT OUTER JOIN  
+    (
+        SELECT
+            t7.event_time AS time,
+            1 AS oxygen
+        FROM eventsheet t7
+        WHERE t7.event_num = 7
+    ) et7
+        ON a.time = et7.time
+    LEFT OUTER JOIN  
+    (
+        SELECT
+            t3.event_time AS time,
+            1 AS mandible
+        FROM eventsheet t3
+        WHERE t3.event_num = 3
+    ) et3
+        ON a.time = et3.time
+    LEFT OUTER JOIN  
+    (
+        SELECT
+            t4.event_time AS time,
+            1 AS support_vent
+        FROM eventsheet t4
+        WHERE t4.event_num = 4
+    ) et4
+        ON a.time = et4.time
+    ORDER BY a.time
+);
+
+############################################################################################################################################################
+### Export data
+SELECT
+    b.id,  
+    b.time,
+    b.diff_time,
+    b.diff,
+    b.dosage,
+    b.speed,
+    b.sex,
+    b.age,
+    b.height,
+    b.weight,
+    b.SPO2,
+    b.PR,
+    b.BIS,
+    b.EMG,
+    b.recovery,
+    b.oxygen,
+    b.mandible,
+    b.support_vent
+FROM cip06 b
+ORDER BY b.id, b.time;
