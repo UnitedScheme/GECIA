@@ -400,3 +400,189 @@ SELECT
     b.support_vent
 FROM cip06 b
 ORDER BY b.id, b.time;
+
+# =========================
+# 8. Add State Numbering and Reorganize Columns
+# =========================
+DROP TABLE IF EXISTS cip07;
+CREATE TABLE cip07 AS   
+(
+    SELECT
+        b.id,
+        b.time,
+        b.state,
+        b.sex,
+        b.age,
+        b.height,
+        b.weight,
+        b.SPO2,
+        b.PR,
+        b.s1,
+        b.s2,
+        b.s3,
+        b.s4,
+        b.s5,
+        b.s6,
+        b.s7,
+        b.s8,
+        b.s9,
+        b.pr1,
+        b.pr2,
+        b.pr3,
+        b.pr4,
+        b.pr5,
+        b.pr6,
+        b.pr7,
+        b.pr8,
+        b.pr9,
+        b.sp1,
+        b.sp2,
+        b.sp3,
+        b.sp4,
+        b.sp5,
+        b.sp6,
+        b.sp7,
+        b.sp8,
+        b.sp9,
+        b.a30 AS action,
+        b.r AS reward,
+        b.npr,
+        b.nsp AS nspo2,
+        b.nbis
+    FROM
+    (
+        -- Add sequential state numbering for each patient
+        SELECT
+            row_number() OVER (PARTITION BY a.id ORDER BY a.id, a.time) AS state, 
+            a.*
+        FROM cmpt a
+        ORDER BY a.time
+    ) b
+);
+
+# =========================
+# 9. Filter Patients with Sufficient Time Data
+# =========================
+-- Filter patients with more than 5 minutes of data (state > 300)
+DROP TABLE IF EXISTS cip08;
+CREATE TABLE cip08 AS   
+(
+    SELECT
+        c.id,
+        b.time,
+        b.state,
+        b.sex,
+        b.age,
+        b.height,
+        b.weight,
+        b.SPO2,
+        b.PR,
+        b.s1,
+        b.s2,
+        b.s3,
+        b.s4,
+        b.s5,
+        b.s6,
+        b.s7,
+        b.s8,
+        b.s9,
+        b.pr1,
+        b.pr2,
+        b.pr3,
+        b.pr4,
+        b.pr5,
+        b.pr6,
+        b.pr7,
+        b.pr8,
+        b.pr9,
+        b.sp1,
+        b.sp2,
+        b.sp3,
+        b.sp4,
+        b.sp5,
+        b.sp6,
+        b.sp7,
+        b.sp8,
+        b.sp9,
+        b.action,
+        b.reward,
+        b.npr,
+        b.nspo2,
+        b.nbis
+    FROM
+    (
+        -- Select patients with more than 300 time steps (5+ minutes)
+        SELECT
+            a.id
+        FROM cip07 a
+        WHERE a.state > 300
+        GROUP BY a.id
+    ) c
+    LEFT OUTER JOIN cip07 b
+        ON c.id = b.id
+    ORDER BY c.id, b.state
+);
+
+# =========================
+# 10. Final Dataset Export for RL Training
+# =========================
+SELECT
+    -- Patient identification and scenario parameters (commented for model training)
+    -- b.id,
+    -- 50 as env,  -- Different application scenarios
+    -- 0 as o2,   -- Oxygen therapy flag
+    -- 50 as drug, -- Different medication types
+    
+    -- Core patient demographics and vitals
+    b.state,
+    b.sex,
+    b.age,
+    b.height,
+    b.weight,
+    b.PR,
+    b.SPO2,    
+    -- Time-series features (s1-s9)
+    b.s1,
+    b.s2,
+    b.s3,
+    b.s4,
+    b.s5,
+    b.s6,
+    b.s7,
+    b.s8,
+    b.s9,   
+    -- Pulse rate features (pr1-pr9)
+    b.pr1,
+    b.pr2,
+    b.pr3,
+    b.pr4,
+    b.pr5,
+    b.pr6,
+    b.pr7,
+    b.pr8,
+    b.pr9,    
+    -- SPO2 features (sp1-sp9)
+    b.sp1,
+    b.sp2,
+    b.sp3,
+    b.sp4,
+    b.sp5,
+    b.sp6,
+    b.sp7,
+    b.sp8,
+    b.sp9,    
+    -- Reinforcement learning components
+    b.action,
+    b.reward,
+    
+    -- Terminal state flag (1 for final state in episode, 0 otherwise)
+    CASE 
+        WHEN ROW_NUMBER() OVER (PARTITION BY b.id ORDER BY b.time DESC) = 1 THEN 1 
+        ELSE 0 
+    END AS terminal,   
+    -- Normalized physiological parameters
+    b.npr,
+    b.nspo2,
+    b.nbis    
+FROM cip08 b  
+ORDER BY b.id, b.time;
