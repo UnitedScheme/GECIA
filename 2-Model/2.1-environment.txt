@@ -1,0 +1,121 @@
+# Offline RL Environment Setup (CentOS 9)
+# ======================================
+
+This document provides comprehensive installation instructions for setting up a CentOS 9 environment 
+to run Ray RLlib with PyTorch and GPU acceleration for offline reinforcement learning applications.
+
+## 1. System Preparation
+# =========================
+
+# Update system packages and install essential tools
+sudo yum update
+sudo yum install epel-release -y
+sudo yum install wget git screen -y
+
+## 2. NVIDIA Driver and CUDA Setup
+# ================================
+
+# Check available NVIDIA GPU
+lspci | grep -i nvidia
+
+# Install development tools and kernel headers
+sudo yum install gcc gcc-c++ kernel-devel kernel-headers dkms -y
+
+# Download and install NVIDIA driver (version 550.144.03)
+chmod a+x NVIDIA-Linux-x86_64-550.144.03.run
+sudo ./NVIDIA-Linux-x86_64-550.144.03.run
+
+# Install CUDA Toolkit (version 12.6)
+wget https://developer.download.nvidia.com/compute/cuda/12.6.0/local_installers/cuda_12.6.0_560.28.03_linux.run
+sudo sh cuda_12.6.0_560.28.03_linux.run
+
+# Configure environment variables for CUDA
+echo 'export PATH=/usr/local/cuda/bin:$PATH' >> ~/.bashrc
+echo 'export LD_LIBRARY_PATH=/usr/local/cuda/lib64:$LD_LIBRARY_PATH' >> ~/.bashrc
+source ~/.bashrc
+
+# Verify NVIDIA driver and CUDA installation
+nvidia-smi
+nvcc -V
+
+## 3. Install Anaconda and Create Python Environment
+# ==================================================
+
+# Download Anaconda Python distribution
+wget https://repo.anaconda.com/archive/Anaconda3-2024.10-1-Linux-x86_64.sh
+
+# Install Anaconda
+bash Anaconda3-2024.10-1-Linux-x86_64.sh
+
+# Activate conda in current session
+source ~/.bashrc
+
+# Create and activate Python 3.9 environment for RL
+conda create -n rayrl python=3.9 -y
+conda activate rayrl
+
+## 4. Install PyTorch with CUDA Support
+# =====================================
+
+# Install PyTorch with CUDA 12.8 support
+pip3 install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu128
+
+# Verify PyTorch CUDA availability
+python -c "import torch; print(torch.cuda.is_available())"
+
+## 5. Install Ray and RLlib
+# =========================
+
+# Optional: Configure pip mirror for faster downloads (Tsinghua University)
+pip config set global.index-url https://pypi.tuna.tsinghua.edu.cn/simple
+
+# Install Ray core with essential components
+pip install -U "ray[data,train,tune,serve]"
+
+# Install RLlib with compression support
+pip install -U "ray[rllib]" lz4
+
+## 6. Install Additional Dependencies
+# ===================================
+
+# Install essential Python packages via pip
+pip install tree typer tqdm gputil scikit-image
+
+# Install scientific computing packages via conda
+conda install -c conda-forge dm-tree numpy pandas scikit-learn onnx skl2onnx xgboost onnxruntime -y
+
+# Install specific versions for compatibility
+conda install -c conda-forge protobuf=3.20.3 onnx=1.12.0 --force-reinstall
+
+# Install data science and visualization packages
+conda install -c conda-forge scipy=1.7.3 gym seaborn matplotlib -y
+
+## Verification Steps
+# ===================
+
+# After installation, verify the environment:
+python -c "
+import torch
+import ray
+import gymnasium as gym
+print('PyTorch CUDA available:', torch.cuda.is_available())
+print('Ray version:', ray.__version__)
+print('Gymnasium version:', gym.__version__)
+"
+
+## Troubleshooting
+# ================
+
+# Common issues and solutions:
+# - If NVIDIA driver fails: Ensure kernel headers match running kernel
+# - If CUDA not found: Verify PATH and LD_LIBRARY_PATH environment variables
+# - If Ray installation fails: Try using conda-forge channel
+# - If GPU memory issues: Reduce batch sizes in training configuration
+
+## Next Steps
+# ===========
+
+# After successful installation, proceed to:
+# 1. Prepare your offline dataset
+# 2. Configure the SAC algorithm parameters
+# 3. Start training with the provided Python script
