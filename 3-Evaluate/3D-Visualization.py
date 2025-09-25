@@ -187,5 +187,6 @@ print("="*50)
 print(f"X-axis range: {x.min():.2f} to {x.max():.2f}")
 print(f"Group 0 - Overall mean: {y0_mean.mean():.2f} ± {y0_std.mean():.2f}")
 print(f"Group 1 - Overall mean: {y1_mean.mean():.2f} ± {y1_std.mean():.2f}")
+
 print(f"Correlation between groups: {np.corrcoef(y0_mean, y1_mean)[0,1]:.3f}")
 print("="*50)
