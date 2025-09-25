@@ -1,10 +1,15 @@
+"""
+SQL Data Transformation for Medical Treatment Model Building
+===========================================================
 
-################################################################################################
-                  ###SQL Data Transformation for Model Building###
-################################################################################################
+This script performs comprehensive data transformation for building medical treatment 
+reinforcement learning models. It processes vital signs, pump data, and adverse events
+to create a clean dataset suitable for offline RL training.
+"""
 
-############################################################################################################################################################
-### Merge all time-point data from vital signs and pumps
+# =========================
+# 1. Merge All Time-Point Data
+# =========================
 DROP TABLE IF EXISTS cip01;
 CREATE TABLE cip01 AS   
 (
@@ -20,6 +25,7 @@ CREATE TABLE cip01 AS
             t.time
         FROM
         (
+            -- Combine time points from all data sources
             SELECT
                 m.event_time AS time
             FROM eventsheet m
@@ -43,9 +49,10 @@ CREATE TABLE cip01 AS
     ORDER BY t1.time
 );
 
-############################################################################################################################################################
-### Clean infusion pump data
-### Remove duplicate data at the same time point
+# =========================
+# 2. Clean Infusion Pump Data
+# =========================
+-- Remove duplicate data at the same time point
 DROP TABLE IF EXISTS cip02;
 CREATE TABLE cip02 AS   
 (
@@ -57,11 +64,12 @@ CREATE TABLE cip02 AS
     FROM
     (
         SELECT
-            row_number() OVER (PARTITION BY c.time ORDER BY c.id IS NULL ASC, c.time) AS dlnum,   ### Place values with empty id at the same time point first
+            row_number() OVER (PARTITION BY c.time ORDER BY c.id IS NULL ASC, c.time) AS dlnum,
             c.id,
             c.time
         FROM
         (
+            -- Combine patient data with operation information
             SELECT
                 a.id,
                 a.time
@@ -76,11 +84,12 @@ CREATE TABLE cip02 AS
     ) d
     LEFT JOIN cip01 a
         ON d.time = a.time
-    WHERE d.dlnum = 1
+    WHERE d.dlnum = 1  -- Keep only first occurrence per time point
 );
 
-############################################################################################################################################################
-### Data merging
+# =========================
+# 3. Merge Patient Vital Signs Data
+# =========================
 DROP TABLE IF EXISTS cip03;
 CREATE TABLE cip03 AS   
 (
@@ -100,6 +109,7 @@ CREATE TABLE cip03 AS
         p2.ETCO2,
         q2.EMG
     FROM cip02 a
+    -- Join SPO2 monitoring data (obs_id = 1004)
     LEFT OUTER JOIN  
     (
         SELECT
@@ -119,6 +129,7 @@ CREATE TABLE cip03 AS
         ) m1
     ) m2
         ON a.time = m2.time
+    -- Join Pulse Rate data (obs_id = 1003)
     LEFT OUTER JOIN  
     (
         SELECT
@@ -138,6 +149,7 @@ CREATE TABLE cip03 AS
         ) n1
     ) n2
         ON a.time = n2.time
+    -- Join BIS monitoring data (obs_id = 1018)
     LEFT OUTER JOIN  
     (
         SELECT
@@ -157,6 +169,7 @@ CREATE TABLE cip03 AS
         ) o1
     ) o2
         ON a.time = o2.time
+    -- Join ETCO2 monitoring data (obs_id = 2003)
     LEFT OUTER JOIN  
     (
         SELECT
@@ -176,6 +189,7 @@ CREATE TABLE cip03 AS
         ) p1
     ) p2
         ON a.time = p2.time
+    -- Join EMG monitoring data (obs_id = 5001)
     LEFT OUTER JOIN  
     (
         SELECT
@@ -195,12 +209,13 @@ CREATE TABLE cip03 AS
         ) q1
     ) q2
         ON a.time = q2.time
+    -- Join patient demographic information
     LEFT OUTER JOIN  
     (
         SELECT
             r.ope_rat_id AS id,
             CASE 
-                WHEN LOWER(r.sex) LIKE '男' THEN 1
+                WHEN LOWER(r.sex) LIKE '男' THEN 1  -- Male: 1, Female: 0
                 ELSE 0 
             END AS sex,
             r.age,
@@ -211,8 +226,9 @@ CREATE TABLE cip03 AS
         ON a.id = r1.id
 );
 
-############################################################################################################################################################
-### Data merging, remove duplicate time point data
+# =========================
+# 4. Remove Duplicate Time Points
+# =========================
 DROP TABLE IF EXISTS cip04;
 CREATE TABLE cip04 AS   
 (
@@ -249,9 +265,10 @@ CREATE TABLE cip04 AS
                 a.SPO2, a.PR, a.BIS, a.ETCO2, a.EMG
         ) a1 
     ) b
-    WHERE b.dlnum = 1
+    WHERE b.dlnum = 1  -- Remove duplicate time points
         AND 
         (
+            -- Filter out records with all NULL values
             b.diff IS NOT NULL
             OR b.dosage IS NOT NULL
             OR b.speed IS NOT NULL
@@ -268,8 +285,9 @@ CREATE TABLE cip04 AS
     ORDER BY b.time
 );
 
-############################################################################################################################################################
-### Add previous time point and corresponding interpolation
+# =========================
+# 5. Add Time Difference Calculation
+# =========================
 DROP TABLE IF EXISTS cip05;
 CREATE TABLE cip05 AS   
 (
@@ -283,13 +301,14 @@ CREATE TABLE cip05 AS
             b.time AS last_time
         FROM cip04 a
         LEFT OUTER JOIN cip04 b
-            ON a.rownum = b.rownum + 1
+            ON a.rownum = b.rownum + 1  -- Join with previous time point
         ORDER BY a.rownum
     ) t
 );
 
-############################################################################################################################################################
-### Adverse event data merging
+# =========================
+# 6. Merge Adverse Event Data
+# =========================
 DROP TABLE IF EXISTS cip06;
 CREATE TABLE cip06 AS   
 (
@@ -307,13 +326,14 @@ CREATE TABLE cip06 AS
         a.SPO2,
         a.PR,
         a.BIS,
-        -- a.ETCO2,
+        -- a.ETCO2,  -- Commented out for current analysis
         a.EMG,
         et2.recovery,
         et7.oxygen,
         et3.mandible,
         et4.support_vent
     FROM cip05 a
+    -- Join recovery events (event_num = 2)
     LEFT OUTER JOIN  
     (
         SELECT
@@ -323,6 +343,7 @@ CREATE TABLE cip06 AS
         WHERE t2.event_num = 2
     ) et2
         ON a.time = et2.time
+    -- Join oxygen events (event_num = 7)
     LEFT OUTER JOIN  
     (
         SELECT
@@ -332,6 +353,7 @@ CREATE TABLE cip06 AS
         WHERE t7.event_num = 7
     ) et7
         ON a.time = et7.time
+    -- Join mandible events (event_num = 3)
     LEFT OUTER JOIN  
     (
         SELECT
@@ -341,6 +363,7 @@ CREATE TABLE cip06 AS
         WHERE t3.event_num = 3
     ) et3
         ON a.time = et3.time
+    -- Join ventilator support events (event_num = 4)
     LEFT OUTER JOIN  
     (
         SELECT
@@ -353,8 +376,9 @@ CREATE TABLE cip06 AS
     ORDER BY a.time
 );
 
-############################################################################################################################################################
-### Export data
+# =========================
+# 7. Export Final Dataset
+# =========================
 SELECT
     b.id,  
     b.time,
